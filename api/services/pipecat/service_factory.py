@@ -29,13 +29,18 @@ from pipecat.services.aws.llm import AWSBedrockLLMService, AWSBedrockLLMSettings
 from pipecat.services.azure.llm import AzureLLMService, AzureLLMSettings
 from pipecat.services.azure.stt import AzureSTTService, AzureSTTSettings
 from pipecat.services.azure.tts import AzureTTSService, AzureTTSSettings
-from pipecat.services.cartesia.stt import CartesiaSTTService, CartesiaSTTSettings
+from pipecat.services.cartesia.stt import CartesiaSTTService as _PipecatCartesiaSTTService
+from pipecat.services.cartesia.stt import CartesiaSTTSettings
 from pipecat.services.cartesia.tts import (
-    CartesiaTTSService,
+    CartesiaTTSService as _PipecatCartesiaTTSService,
+)
+from pipecat.services.cartesia.tts import (
     CartesiaTTSSettings,
     GenerationConfig,
 )
-from pipecat.services.cartesia.turns.stt import CartesiaTurnsSTTService
+from pipecat.services.cartesia.turns.stt import (
+    CartesiaTurnsSTTService as _PipecatCartesiaTurnsSTTService,
+)
 from pipecat.services.deepgram.flux.stt import (
     DeepgramFluxSTTService,
     DeepgramFluxSTTSettings,
@@ -224,6 +229,62 @@ def _elevenlabs_realtime_stt_host(base_url: str) -> str:
         path = parsed.path
         return f"{parsed.netloc}{path}" if path else parsed.netloc
     return websocket_url
+
+
+# Cartesia's current API version. WebSocket routes require this as
+# cartesia_version; HTTP routes require the same date as Cartesia-Version.
+# Server auth is Authorization: Bearer. X-API-Key is still accepted, so send
+# both. A standard sk_car_ key is valid for TTS/STT; leftover whitespace is not.
+CARTESIA_API_VERSION = "2026-08-14"
+
+
+def _cartesia_api_key(api_key: str) -> str:
+    return (api_key or "").strip()
+
+
+def _cartesia_websocket_auth(uri: str, headers: dict | None, api_key: str) -> tuple[str, dict]:
+    """Return the WebSocket URL and handshake headers Cartesia currently requires."""
+    if "cartesia_version=" not in uri:
+        separator = "&" if "?" in uri else "?"
+        uri = f"{uri}{separator}cartesia_version={CARTESIA_API_VERSION}"
+    auth_headers = dict(headers or {})
+    key = _cartesia_api_key(api_key)
+    if key:
+        auth_headers["Authorization"] = f"Bearer {key}"
+        auth_headers["X-API-Key"] = key
+    auth_headers["Cartesia-Version"] = CARTESIA_API_VERSION
+    return uri, auth_headers
+
+
+class _CartesiaCurrentAuth:
+    """Attach the auth headers and version query param current Cartesia docs require.
+
+    Pipecat still opens some Cartesia sockets with an older version header and
+    no version query parameter. Current docs require both the version query
+    param and Authorization: Bearer, and a key with stray whitespace fails
+    that handshake as invalid.
+    """
+
+    def _websocket_connect(self, uri: str, **kwargs):
+        uri, headers = _cartesia_websocket_auth(
+            uri,
+            kwargs.get("additional_headers"),
+            getattr(self, "_api_key", ""),
+        )
+        kwargs["additional_headers"] = headers
+        return super()._websocket_connect(uri, **kwargs)
+
+
+class CartesiaTTSService(_CartesiaCurrentAuth, _PipecatCartesiaTTSService):
+    pass
+
+
+class CartesiaSTTService(_CartesiaCurrentAuth, _PipecatCartesiaSTTService):
+    pass
+
+
+class CartesiaTurnsSTTService(_CartesiaCurrentAuth, _PipecatCartesiaTurnsSTTService):
+    pass
 
 
 def stt_uses_external_turns(user_config) -> bool:
@@ -417,16 +478,17 @@ def create_stt_service(
             sample_rate=audio_config.transport_in_sample_rate,
         )
     elif user_config.stt.provider == ServiceProviders.CARTESIA.value:
+        api_key = _cartesia_api_key(user_config.stt.api_key)
         if user_config.stt.model == "ink-2":
             return CartesiaTurnsSTTService(
-                api_key=user_config.stt.api_key,
+                api_key=api_key,
                 should_interrupt=False,  # Let UserAggregator emit interruption frames.
                 sample_rate=audio_config.transport_in_sample_rate,
             )
 
         language = getattr(user_config.stt, "language", None) or "en"
         return CartesiaSTTService(
-            api_key=user_config.stt.api_key,
+            api_key=api_key,
             settings=CartesiaSTTSettings(
                 model=user_config.stt.model,
                 language=language,
@@ -749,7 +811,7 @@ def create_tts_service(
         )
         language = getattr(user_config.tts, "language", None) or "en"
         return CartesiaTTSService(
-            api_key=user_config.tts.api_key,
+            api_key=_cartesia_api_key(user_config.tts.api_key),
             settings=CartesiaTTSSettings(
                 voice=user_config.tts.voice,
                 model=user_config.tts.model,

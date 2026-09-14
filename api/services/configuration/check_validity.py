@@ -344,6 +344,53 @@ class UserConfigurationValidator:
         return True
 
     def _check_cartesia_api_key(self, model: str, api_key: str) -> bool:
+        # Current Cartesia server auth is Authorization: Bearer plus a
+        # Cartesia-Version date. A standard sk_car_ key works for TTS/STT;
+        # an admin key (sk_car_admin_) is rejected on those routes even when
+        # the account still has model credits.
+        key = (api_key or "").strip()
+        if key.startswith(("dgr", "mps")):
+            raise ValueError(
+                "This is a Dograh key, not a Cartesia API key. For Cartesia TTS "
+                "and STT, paste a standard key from https://play.cartesia.ai/keys "
+                "(it starts with sk_car_, not sk_car_admin_)."
+            )
+        if key.startswith("sk_car_admin_"):
+            raise ValueError(
+                "This is a Cartesia admin key. TTS and STT reject admin keys. "
+                "Create a standard API key at https://play.cartesia.ai/keys "
+                "(sk_car_..., not sk_car_admin_...)."
+            )
+        if not key.startswith("sk_car_"):
+            raise ValueError(
+                "Invalid Cartesia API key format. Use a standard key from "
+                "https://play.cartesia.ai/keys that starts with sk_car_."
+            )
+        headers = {
+            "Authorization": f"Bearer {key}",
+            "X-API-Key": key,
+            "Cartesia-Version": "2026-08-14",
+        }
+        try:
+            response = httpx.get(
+                "https://api.cartesia.ai/voices",
+                headers=headers,
+                params={"limit": 1},
+                timeout=10.0,
+            )
+        except httpx.RequestError as exc:
+            raise ValueError(
+                "Could not connect to the Cartesia API. Please check your network "
+                "connection and try again."
+            ) from exc
+        if response.status_code == 200:
+            return True
+        if response.status_code in (401, 403):
+            raise ValueError(
+                "Invalid Cartesia API key. The key was rejected by the Cartesia API. "
+                "Model credits do not make an admin key or a revoked key valid for "
+                "TTS/STT. Use a standard key from https://play.cartesia.ai/keys."
+            ) from None
         return True
 
     def _check_dograh_api_key(self, model: str, api_key: str) -> bool:

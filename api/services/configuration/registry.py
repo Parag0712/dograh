@@ -329,7 +329,15 @@ GOOGLE_VERTEX_REALTIME_PROVIDER_MODEL_CONFIG = provider_model_config(
 )
 DEEPGRAM_PROVIDER_MODEL_CONFIG = provider_model_config("Deepgram")
 ELEVENLABS_PROVIDER_MODEL_CONFIG = provider_model_config("ElevenLabs")
-CARTESIA_PROVIDER_MODEL_CONFIG = provider_model_config("Cartesia")
+CARTESIA_PROVIDER_MODEL_CONFIG = provider_model_config(
+    "Cartesia",
+    description=(
+        "Cartesia Sonic TTS and Ink STT. Use a standard API key (sk_car_...) "
+        "from play.cartesia.ai/keys. Admin keys (sk_car_admin_...) and Dograh "
+        "service keys are rejected on TTS and STT even if the account has credits."
+    ),
+    provider_docs_url="https://docs.cartesia.ai/get-started/authenticate-your-client-applications",
+)
 XAI_PROVIDER_MODEL_CONFIG = provider_model_config("xAI")
 LMNT_PROVIDER_MODEL_CONFIG = provider_model_config("LMNT")
 SPEECHIFY_PROVIDER_MODEL_CONFIG = provider_model_config(
